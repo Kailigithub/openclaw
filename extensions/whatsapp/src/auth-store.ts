@@ -71,6 +71,7 @@ async function waitForWebAuthBarrier(
 
 export async function restoreCredsFromBackupIfNeeded(authDir: string): Promise<boolean> {
   const logger = getChildLogger({ module: "web-session" });
+  let tempRestorePath: string | null = null;
   try {
     const credsPath = resolveWebCredsPath(authDir);
     const backupPath = resolveWebCredsBackupPath(authDir);
@@ -85,17 +86,34 @@ export async function restoreCredsFromBackupIfNeeded(authDir: string): Promise<b
     if (!backupRaw) {
       return false;
     }
+    const backupStats = await fs.lstat(backupPath).catch(() => null);
+    if (!backupStats?.isFile()) {
+      return false;
+    }
 
     // Ensure backup is parseable before restoring.
     JSON.parse(backupRaw);
-    await fs.copyFile(backupPath, credsPath);
-    await fs.chmod(credsPath, 0o600).catch(() => {
-      // best-effort on platforms that support it
+    tempRestorePath = path.join(
+      authDir,
+      `.creds.restore-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
+    );
+    await fs.writeFile(tempRestorePath, backupRaw, {
+      encoding: "utf-8",
+      mode: 0o600,
+      flag: "wx",
     });
+    await fs.rename(tempRestorePath, credsPath);
+    tempRestorePath = null;
     logger.warn({ credsPath }, "restored corrupted WhatsApp creds.json from backup");
     return true;
   } catch {
     // ignore
+  } finally {
+    if (tempRestorePath) {
+      await fs.rm(tempRestorePath, { force: true }).catch(() => {
+        // best-effort temp cleanup
+      });
+    }
   }
   return false;
 }
@@ -288,12 +306,7 @@ export async function logoutWeb(params: {
     return false;
   }
   if (params.isLegacyAuthDir) {
-    try {
-      await clearLegacyBaileysAuthState(resolvedAuthDir);
-    } catch {
-      // Explicit logout should still clear broken legacy auth dirs instead of no-oping on read failures.
-      await fs.rm(resolvedAuthDir, { recursive: true, force: true });
-    }
+    await clearLegacyBaileysAuthState(resolvedAuthDir);
   } else {
     await fs.rm(resolvedAuthDir, { recursive: true, force: true });
   }

@@ -7,6 +7,7 @@ import {
   pickWebChannel,
   readWebAuthSnapshot,
   readWebAuthState,
+  restoreCredsFromBackupIfNeeded,
   webAuthExists,
   WhatsAppAuthUnstableError,
   WHATSAPP_AUTH_UNSTABLE_CODE,
@@ -47,6 +48,35 @@ describe("auth-store", () => {
 
     await expect(webAuthExists(authDir)).resolves.toBe(false);
     expect(fsSync.existsSync(credsPath)).toBe(false);
+  });
+
+  it("restores creds from a regular backup file", async () => {
+    const authDir = createTempAuthDir("openclaw-wa-auth-restore");
+    const credsPath = path.join(authDir, "creds.json");
+    fsSync.writeFileSync(credsPath, "{", "utf-8");
+    fsSync.writeFileSync(
+      path.join(authDir, "creds.json.bak"),
+      JSON.stringify({ me: { id: "123@s.whatsapp.net" } }),
+      "utf-8",
+    );
+
+    await expect(restoreCredsFromBackupIfNeeded(authDir)).resolves.toBe(true);
+    expect(JSON.parse(fsSync.readFileSync(credsPath, "utf-8"))).toEqual({
+      me: { id: "123@s.whatsapp.net" },
+    });
+  });
+
+  it("refuses to restore creds from a symlinked backup path", async () => {
+    const authDir = createTempAuthDir("openclaw-wa-auth-restore-symlink");
+    const targetPath = path.join(authDir, "backup-target.json");
+    const backupPath = path.join(authDir, "creds.json.bak");
+    const credsPath = path.join(authDir, "creds.json");
+    fsSync.writeFileSync(targetPath, JSON.stringify({ me: { id: "123@s.whatsapp.net" } }), "utf-8");
+    fsSync.symlinkSync(targetPath, backupPath);
+    fsSync.writeFileSync(credsPath, "{", "utf-8");
+
+    await expect(restoreCredsFromBackupIfNeeded(authDir)).resolves.toBe(false);
+    expect(fsSync.readFileSync(credsPath, "utf-8")).toBe("{");
   });
 
   it("reports linked auth state and snapshot from the shared read helper", async () => {
@@ -101,6 +131,32 @@ describe("auth-store", () => {
 
     await expect(logoutWeb({ authDir, runtime: runtime as never })).resolves.toBe(true);
     expect(fsSync.existsSync(authDir)).toBe(false);
+  });
+
+  it("does not delete the whole legacy auth root when targeted cleanup fails", async () => {
+    const authDir = createTempAuthDir("openclaw-wa-auth-legacy-failure");
+    fsSync.writeFileSync(path.join(authDir, "creds.json"), "{}", "utf-8");
+    fsSync.writeFileSync(path.join(authDir, "oauth.json"), '{"token":true}', "utf-8");
+    fsSync.writeFileSync(path.join(authDir, "session-abc.json"), "{}", "utf-8");
+    const originalRm = fs.rm;
+    const rmSpy = vi.spyOn(fs, "rm").mockImplementation(async (target, options) => {
+      if (String(target).endsWith("creds.json")) {
+        throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+      }
+      return await originalRm.call(fs, target, options as never);
+    });
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+
+    await expect(
+      logoutWeb({ authDir, isLegacyAuthDir: true, runtime: runtime as never }),
+    ).rejects.toThrow("EACCES");
+    expect(fsSync.existsSync(authDir)).toBe(true);
+    expect(fsSync.existsSync(path.join(authDir, "oauth.json"))).toBe(true);
+    rmSpy.mockRestore();
   });
 
   it("clears auth state even when directory enumeration fails", async () => {

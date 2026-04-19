@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChannelRuntimeSnapshot } from "../server-channel-runtime.types.js";
 import type { GatewayRequestHandlerOptions } from "./types.js";
 
 const mocks = vi.hoisted(() => ({
@@ -36,6 +37,24 @@ function createOptions(
     respond: vi.fn(),
     context: {
       startChannel: vi.fn(),
+      getRuntimeSnapshot: vi.fn(
+        (): ChannelRuntimeSnapshot => ({
+          channels: {
+            whatsapp: {
+              accountId: "default-account",
+              running: true,
+            },
+          },
+          channelAccounts: {
+            whatsapp: {
+              "default-account": {
+                accountId: "default-account",
+                running: true,
+              },
+            },
+          },
+        }),
+      ),
     },
     ...overrides,
   } as unknown as GatewayRequestHandlerOptions;
@@ -68,6 +87,24 @@ describe("channelsHandlers channels.start", () => {
           respond,
           context: {
             startChannel,
+            getRuntimeSnapshot: vi.fn(
+              (): ChannelRuntimeSnapshot => ({
+                channels: {
+                  whatsapp: {
+                    accountId: "default-account",
+                    running: true,
+                  },
+                },
+                channelAccounts: {
+                  whatsapp: {
+                    "default-account": {
+                      accountId: "default-account",
+                      running: true,
+                    },
+                  },
+                },
+              }),
+            ),
           } as unknown as GatewayRequestHandlerOptions["context"],
         },
       ),
@@ -84,6 +121,52 @@ describe("channelsHandlers channels.start", () => {
         channel: "whatsapp",
         accountId: "default-account",
         started: true,
+      },
+      undefined,
+    );
+  });
+
+  it("reports started=false when the channel runtime remains stopped", async () => {
+    const startChannel = vi.fn();
+    const respond = vi.fn();
+
+    await channelsHandlers["channels.start"](
+      createOptions(
+        { channel: "whatsapp" },
+        {
+          respond,
+          context: {
+            startChannel,
+            getRuntimeSnapshot: vi.fn(
+              (): ChannelRuntimeSnapshot => ({
+                channels: {
+                  whatsapp: {
+                    accountId: "default-account",
+                    running: false,
+                  },
+                },
+                channelAccounts: {
+                  whatsapp: {
+                    "default-account": {
+                      accountId: "default-account",
+                      running: false,
+                    },
+                  },
+                },
+              }),
+            ),
+          } as unknown as GatewayRequestHandlerOptions["context"],
+        },
+      ),
+    );
+
+    expect(startChannel).toHaveBeenCalledWith("whatsapp", "default-account");
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      {
+        channel: "whatsapp",
+        accountId: "default-account",
+        started: false,
       },
       undefined,
     );

@@ -24,6 +24,7 @@ import {
   validateChannelsLogoutParams,
   validateChannelsStatusParams,
 } from "../protocol/index.js";
+import type { ChannelRuntimeSnapshot } from "../server-channel-runtime.types.js";
 import { formatForLog } from "../ws-log.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 
@@ -37,8 +38,22 @@ type ChannelLogoutPayload = {
 type ChannelStartPayload = {
   channel: ChannelId;
   accountId: string;
-  started: true;
+  started: boolean;
 };
+
+function resolveRuntimeAccountSnapshot(params: {
+  runtime: ChannelRuntimeSnapshot;
+  channelId: ChannelId;
+  accountId: string;
+}): ChannelAccountSnapshot | undefined {
+  const accounts = params.runtime.channelAccounts[params.channelId];
+  const direct = accounts?.[params.accountId];
+  if (direct) {
+    return direct;
+  }
+  const fallback = params.runtime.channels[params.channelId];
+  return fallback?.accountId === params.accountId ? fallback : undefined;
+}
 
 function resolveChannelGatewayAccountId(params: {
   plugin: ChannelPlugin;
@@ -97,10 +112,17 @@ export async function startChannelAccount(params: {
   }
   const resolvedAccountId = resolveChannelGatewayAccountId(params);
   await params.context.startChannel(params.channelId, resolvedAccountId);
+  const runtime = params.context.getRuntimeSnapshot();
+  const started =
+    resolveRuntimeAccountSnapshot({
+      runtime,
+      channelId: params.channelId,
+      accountId: resolvedAccountId,
+    })?.running === true;
   return {
     channel: params.channelId,
     accountId: resolvedAccountId,
-    started: true,
+    started,
   };
 }
 

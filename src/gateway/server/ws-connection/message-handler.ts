@@ -575,7 +575,7 @@ export function attachGatewayWsMessageHandler(params: {
             connectParams.scopes = scopes;
           }
         };
-        const pairingLocality = resolvePairingLocality({
+        let pairingLocality = resolvePairingLocality({
           connectParams,
           isLocalClient,
           requestHost,
@@ -586,7 +586,7 @@ export function attachGatewayWsMessageHandler(params: {
           sharedAuthOk,
           authMethod,
         });
-        const skipLocalBackendSelfPairing = shouldSkipLocalBackendSelfPairing({
+        let skipLocalBackendSelfPairing = shouldSkipLocalBackendSelfPairing({
           connectParams,
           locality: pairingLocality,
           hasBrowserOriginHeader,
@@ -759,6 +759,24 @@ export function attachGatewayWsMessageHandler(params: {
             }),
           verifyDeviceToken,
         }));
+        pairingLocality = resolvePairingLocality({
+          connectParams,
+          isLocalClient,
+          requestHost,
+          requestOrigin,
+          remoteAddress: remoteAddr,
+          hasProxyHeaders,
+          hasBrowserOriginHeader,
+          sharedAuthOk,
+          authMethod,
+        });
+        skipLocalBackendSelfPairing = shouldSkipLocalBackendSelfPairing({
+          connectParams,
+          locality: pairingLocality,
+          hasBrowserOriginHeader,
+          sharedAuthOk,
+          authMethod,
+        });
         if (!authOk) {
           rejectUnauthorized(authResult);
           return;
