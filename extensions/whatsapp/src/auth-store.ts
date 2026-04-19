@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -93,10 +94,7 @@ export async function restoreCredsFromBackupIfNeeded(authDir: string): Promise<b
 
     // Ensure backup is parseable before restoring.
     JSON.parse(backupRaw);
-    tempRestorePath = path.join(
-      authDir,
-      `.creds.restore-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
-    );
+    tempRestorePath = path.join(authDir, `.creds.restore-${randomUUID()}.tmp`);
     await fs.writeFile(tempRestorePath, backupRaw, {
       encoding: "utf-8",
       mode: 0o600,
