@@ -90,6 +90,13 @@ async function cleanOrphanBackups(configPath: string, ioFs: BackupRotationFs): P
       continue;
     }
     const suffix = entry.slice(bakPrefix.length);
+    // Restrict the cleanup to files that this module actually creates: a
+    // pure integer suffix indicates a numbered ring slot. Anything else
+    // (e.g. `.bak-manual-20260808`, `.bak.pre-update`) is user-authored
+    // and must be left alone (#120253).
+    if (!/^[0-9]+$/.test(suffix)) {
+      continue;
+    }
     if (validSuffixes.has(suffix)) {
       continue;
     }

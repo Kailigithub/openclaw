@@ -68,7 +68,7 @@ describe("config backup rotation", () => {
       const configPath = resolveConfigPathFromTempState();
       await fs.writeFile(configPath, JSON.stringify({ token: "secret" }), { mode: 0o600 });
       await fs.writeFile(`${configPath}.bak`, "previous", { mode: 0o644 });
-      await fs.writeFile(`${configPath}.bak.orphan`, "old");
+      await fs.writeFile(`${configPath}.bak.99`, "stale-ring-slot");
 
       await maintainConfigBackups(configPath, fs);
 
@@ -84,8 +84,25 @@ describe("config backup rotation", () => {
         const primaryBackupStat = await fs.stat(`${configPath}.bak`);
         expectPosixMode(primaryBackupStat.mode, 0o600);
       }
-      // Out-of-ring orphan gets pruned.
-      await expectPathMissing(`${configPath}.bak.orphan`);
+      // Out-of-ring numbered slot (escaped stale ring slot) gets pruned.
+      await expectPathMissing(`${configPath}.bak.99`);
+    });
+  });
+
+  it("cleanOrphanBackups preserves user-authored non-integer .bak.* files (#120253)", async () => {
+    await withTempHome(async () => {
+      const configPath = resolveConfigPathFromTempState();
+      await fs.writeFile(configPath, JSON.stringify({ token: "secret" }), { mode: 0o600 });
+      const userManualBackup = `${configPath}.bak-manual-20260808`;
+      const userLabeledBackup = `${configPath}.bak.pre-edit`;
+      await fs.writeFile(userManualBackup, "manual snapshot");
+      await fs.writeFile(userLabeledBackup, "pre-edit snapshot");
+
+      await maintainConfigBackups(configPath, fs);
+
+      // User-authored backups must survive cleanup untouched.
+      await expect(fs.readFile(userManualBackup, "utf-8")).resolves.toBe("manual snapshot");
+      await expect(fs.readFile(userLabeledBackup, "utf-8")).resolves.toBe("pre-edit snapshot");
     });
   });
 
@@ -194,7 +211,9 @@ describe("config backup rotation", () => {
       logVerboseMock.mockClear();
       const configPath = resolveConfigPathFromTempState();
       await fs.writeFile(configPath, JSON.stringify({ token: "secret" }), { mode: 0o600 });
-      const lockedOrphan = `${configPath}.bak.orphan`;
+      // Use a stale numbered ring slot (.bak.99, outside the active 1..4 ring)
+      // so the cleanup still considers it an orphan candidate.
+      const lockedOrphan = `${configPath}.bak.99`;
       await fs.writeFile(lockedOrphan, "orphan");
 
       // A locked/undeletable orphan: unlink rejects for this entry only, so rotate/copy/harden
