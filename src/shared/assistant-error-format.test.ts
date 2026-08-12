@@ -4,6 +4,7 @@ import {
   extractLeadingHttpStatus,
   extractProviderWrappedHttpStatus,
   formatRawAssistantErrorForUi,
+  isCloudflareOrHtmlErrorPage,
   parseApiErrorInfo,
 } from "./assistant-error-format.js";
 
@@ -105,5 +106,47 @@ describe("HTTP status consumers", () => {
       expect(parseApiErrorInfo(`${code} ${payload}`)).toBeNull();
       expect(formatRawAssistantErrorForUi(`${code} ${payload}`)).toBe(`${code} ${payload}`);
     }
+  });
+});
+
+describe("isCloudflareOrHtmlErrorPage", () => {
+  it("detects HTML body preceded by a `HTTP <code> <reason>` status line", () => {
+    const raw = [
+      "HTTP 502 Bad Gateway",
+      "",
+      "<!doctype html><html><head><title>502 Bad Gateway</title></head><body><h1>502</h1><p>Cloudflare error</p></body></html>",
+    ].join("\n");
+    expect(isCloudflareOrHtmlErrorPage(raw)).toBe(true);
+  });
+
+  it("still detects HTML body when the payload starts directly with HTML", () => {
+    const raw = "<!doctype html><html><body>Cloudflare error</body></html>";
+    expect(isCloudflareOrHtmlErrorPage(raw)).toBe(true);
+  });
+
+  it("returns false for a non-HTML 5xx error", () => {
+    expect(isCloudflareOrHtmlErrorPage("HTTP 500 Internal Server Error")).toBe(false);
+  });
+
+  it("returns false when the HTML body is not preceded by a Cloudflare error hint", () => {
+    expect(isCloudflareOrHtmlErrorPage("<!doctype html><html><body>hello</body></html>")).toBe(
+      false,
+    );
+  });
+
+  it("returns false for empty input", () => {
+    expect(isCloudflareOrHtmlErrorPage("")).toBe(false);
+  });
+});
+
+describe("formatRawAssistantErrorForUi (HTML after status line)", () => {
+  it("does not return raw HTML when an HTTP 5xx status line precedes the body", () => {
+    const raw = [
+      "HTTP 502 Bad Gateway",
+      "",
+      "<!doctype html><html><head><title>502 Bad Gateway</title></head><body><h1>502</h1><p>Cloudflare error</p></body></html>",
+    ].join("\n");
+    expect(formatRawAssistantErrorForUi(raw)).not.toMatch(/<!doctype\s+html|<html\b/i);
+    expect(formatRawAssistantErrorForUi(raw)).toContain("HTTP 502");
   });
 });

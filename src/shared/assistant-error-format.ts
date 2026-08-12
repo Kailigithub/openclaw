@@ -169,9 +169,8 @@ export function isCloudflareOrHtmlErrorPage(raw: string): boolean {
     return true;
   }
 
-  return (
-    status.code < 600 && HTML_ERROR_PREFIX_RE.test(status.rest) && HTML_CLOSE_RE.test(status.rest)
-  );
+  const body = status.rest.replace(/^[^\n]*\n+/, "");
+  return status.code < 600 && HTML_ERROR_PREFIX_RE.test(body) && HTML_CLOSE_RE.test(body);
 }
 
 export function isGenericProviderInternalError(raw: string): boolean {
