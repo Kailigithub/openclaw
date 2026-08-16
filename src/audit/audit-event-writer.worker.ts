@@ -28,7 +28,12 @@ if (!parentPort || !stateDir) {
   throw new Error("audit event writer requires a parent port and state directory");
 }
 const port = parentPort;
-const database = { env: { OPENCLAW_STATE_DIR: stateDir } };
+// Spread `process.env` so the worker thread inherits supervisor markers
+// (e.g. OPENCLAW_SUPERVISOR_MODE=external) alongside the explicitly
+// forwarded OPENCLAW_STATE_DIR. Otherwise the reduced env would fence the
+// Gateway's own audit writer out of state it is meant to protect.
+// See: https://github.com/openclaw/openclaw/issues/123691
+const database = { env: { ...process.env, OPENCLAW_STATE_DIR: stateDir } };
 
 function executionIdentityFailureMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
