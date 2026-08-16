@@ -6,6 +6,7 @@ import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
+import { claimOpenClawStateOwnership } from "../state/openclaw-state-ownership-operations.js";
 import { listAuditEvents, recordAuditEvent } from "./audit-event-store.js";
 import type { AuditEventInput } from "./audit-event-types.js";
 import { createAuditEventWriter } from "./audit-event-writer.js";
@@ -790,5 +791,61 @@ describe("audit event worker", () => {
     expect(
       inspectExecutionIdentityRun({ runId: "after-key-loss" }, database).identity,
     ).toMatchObject({ state: "unknown", reasonCode: "run_not_found" });
+  });
+
+  it("inherits the Gateway's OPENCLAW_SUPERVISOR_MODE marker across the worker boundary when external ownership is claimed", async () => {
+    const stateDir = tempDirs.make("openclaw-audit-writer-supervised-");
+    const supervisorEnv = { OPENCLAW_STATE_DIR: stateDir, OPENCLAW_SUPERVISOR_MODE: "external" };
+    claimOpenClawStateOwnership("gateway-supervisor", { env: supervisorEnv });
+    closeOpenClawStateDatabaseForTest();
+    const previousSupervisorMode = process.env.OPENCLAW_SUPERVISOR_MODE;
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_SUPERVISOR_MODE = "external";
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    const errors: string[] = [];
+    const writer = createAuditEventWriter({
+      stateDir,
+      onError: (error) => errors.push(error),
+    });
+    try {
+      await writer.ready;
+      const eventInput: AuditEventInput = {
+        sourceId: "supervised-worker-run:1:started",
+        sourceSequence: 1,
+        occurredAt: Date.now(),
+        kind: "agent_run",
+        action: "agent.run.started",
+        status: "started",
+        actorType: "agent",
+        actorId: "main",
+        agentId: "main",
+        runId: "supervised-worker-run",
+      };
+      expect(writer.record(eventInput)).toBe(true);
+      await writer.stop();
+      expect(errors).toEqual([]);
+      expect(errors.some((error) => error.includes("OpenClawStateExternalOwnershipError"))).toBe(
+        false,
+      );
+      const database = {
+        env: { OPENCLAW_STATE_DIR: stateDir, OPENCLAW_SUPERVISOR_MODE: "external" },
+      };
+      expect(
+        listAuditEvents({ database, limit: 10 }).events.some(
+          (event) => event.runId === "supervised-worker-run",
+        ),
+      ).toBe(true);
+    } finally {
+      if (previousSupervisorMode === undefined) {
+        delete process.env.OPENCLAW_SUPERVISOR_MODE;
+      } else {
+        process.env.OPENCLAW_SUPERVISOR_MODE = previousSupervisorMode;
+      }
+      if (previousStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      }
+    }
   });
 });
